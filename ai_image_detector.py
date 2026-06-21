@@ -51,7 +51,7 @@ class AIImageDetector:
         filename = os.path.basename(image_path)
         h, w = image.shape[:2]
 
-        # 1. 频域分析
+        # 1. 频域分析 - 修复：真实照片高频多，不应直接乘3
         gray = np.mean(image, axis=2).astype(np.uint8) if len(image.shape) == 3 else image
         f_transform = np.fft.fft2(gray)
         f_shift = np.fft.fftshift(f_transform)
@@ -61,7 +61,9 @@ class AIImageDetector:
         y, x = np.ogrid[:h, :w]
         mask_low = (x - cx)**2 + (y - cy)**2 <= radius**2
         high_freq = np.sum(magnitude[~mask_low]) / (np.sum(magnitude) + 1e-10)
-        freq_score = min(high_freq * 3, 1.0)
+        # 真实照片高频比例通常在 0.3-0.5，AI图像可能更极端
+        # 用高斯函数将 0.3-0.7 映射到 0-1
+        freq_score = max(0, min(abs(high_freq - 0.5) * 3, 1.0))
 
         # 2. ELA噪声分析
         try:
@@ -75,11 +77,16 @@ class AIImageDetector:
         except:
             ela_score = 0.5
 
-        # 3. 颜色平滑度
+        # 3. 颜色平滑度 - 修复：真实照片也有平滑区域
         grad_x = np.abs(np.diff(image.astype(float), axis=1))
         grad_y = np.abs(np.diff(image.astype(float), axis=0))
-        sharp = np.sum(np.concatenate([grad_x.flatten(), grad_y.flatten()]) > 30) / (grad_x.size + grad_y.size)
-        color_score = max(0, 1 - sharp * 5)
+        all_grads = np.concatenate([grad_x.flatten(), grad_y.flatten()])
+        # 使用梯度分布的变异系数（纯numpy）
+        grad_mean = np.mean(all_grads)
+        grad_std = np.std(all_grads)
+        cv = grad_std / (grad_mean + 1e-10) if grad_mean > 0 else 0
+        # 真实照片梯度变化更自然（cv适中），AI可能过于均匀
+        color_score = max(0, min(abs(cv - 2.0) / 2.0, 1.0))
 
         # 4. 纹理LBP
         lbp_score = self._lbp_score(gray)
@@ -87,12 +94,16 @@ class AIImageDetector:
         # 5. 元数据
         meta_score = self._metadata_score(image_path, image)
 
-        # 6. 边缘分析
+        # 6. 边缘分析 - 修复：真实照片边缘密度也高
         gx = np.abs(np.diff(gray.astype(float), axis=1))
         gy = np.abs(np.diff(gray.astype(float), axis=0))
         edge_mag = np.sqrt(gx[:-1,:]**2 + gy[:,:-1]**2)
-        edge_density = np.sum(edge_mag > 50) / edge_mag.size
-        edge_score = max(0, min(1 - edge_density * 3, 1.0))
+        # 计算边缘的均匀性而非密度
+        edge_mean = np.mean(edge_mag)
+        edge_std = np.std(edge_mag)
+        cv = edge_std / (edge_mean + 1e-10) if edge_mean > 0 else 0
+        # 真实照片边缘变化更自然（cv适中），AI可能过于均匀或过于杂乱
+        edge_score = max(0, min(abs(cv - 1.5) / 1.5, 1.0))
 
         # 加权计算
         weights = {'freq': 0.20, 'ela': 0.20, 'color': 0.15, 'lbp': 0.15, 'meta': 0.15, 'edge': 0.15}
