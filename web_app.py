@@ -192,7 +192,8 @@ def api_detect():
     file.save(filepath)
 
     try:
-        result = detector.detect(filepath)
+        # 限制图片大小，防止内存不足
+        result = detector.detect(filepath, max_size=1024)
 
         response = {
             'success': True,

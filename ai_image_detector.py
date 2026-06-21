@@ -36,10 +36,17 @@ class AIImageDetector:
     def __init__(self):
         pass
 
-    def detect(self, image_path: str) -> DetectionResult:
+    def detect(self, image_path: str, max_size: int = 1024) -> DetectionResult:
         image = self._load_image(image_path)
         if image is None:
             raise ValueError(f"无法加载图像: {image_path}")
+
+        # 缩放大图，防止内存不足
+        h, w = image.shape[:2]
+        if max(h, w) > max_size:
+            pil_img = Image.fromarray(image)
+            pil_img.thumbnail((max_size, max_size), Image.LANCZOS)
+            image = np.array(pil_img)
 
         filename = os.path.basename(image_path)
         h, w = image.shape[:2]
