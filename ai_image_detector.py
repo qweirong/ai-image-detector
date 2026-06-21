@@ -51,7 +51,7 @@ class AIImageDetector:
         filename = os.path.basename(image_path)
         h, w = image.shape[:2]
 
-        # 1. 频域分析 - 修复：真实照片高频多，不应直接乘3
+        # 1. 频域分析 - AI图像频谱通常更平滑或更规则
         gray = np.mean(image, axis=2).astype(np.uint8) if len(image.shape) == 3 else image
         f_transform = np.fft.fft2(gray)
         f_shift = np.fft.fftshift(f_transform)
@@ -61,9 +61,14 @@ class AIImageDetector:
         y, x = np.ogrid[:h, :w]
         mask_low = (x - cx)**2 + (y - cy)**2 <= radius**2
         high_freq = np.sum(magnitude[~mask_low]) / (np.sum(magnitude) + 1e-10)
-        # 真实照片高频比例通常在 0.3-0.5，AI图像可能更极端
-        # 用高斯函数将 0.3-0.7 映射到 0-1
-        freq_score = max(0, min(abs(high_freq - 0.5) * 3, 1.0))
+        # 频谱对称性 - AI图像频谱通常更对称
+        top_half = magnitude[:h//2, :]
+        bottom_half = np.flipud(magnitude[h//2:, :])
+        min_h = min(top_half.shape[0], bottom_half.shape[0])
+        symmetry = np.mean(np.abs(top_half[:min_h] - bottom_half[:min_h])) / (np.mean(magnitude) + 1e-10)
+        sym_score = max(0, min(1 - symmetry * 2, 1.0))
+        # 综合频域得分
+        freq_score = (sym_score * 0.6 + max(0, min(abs(high_freq - 0.5) * 2, 1.0)) * 0.4)
 
         # 2. ELA噪声分析
         try:
@@ -116,13 +121,13 @@ class AIImageDetector:
             edge_score * weights['edge']
         )
 
-        # 判断状态
-        if ai_probability < 0.35:
+        # 判断状态 - 降低AI判定门槛
+        if ai_probability < 0.30:
             status = 'CLEAR'
             is_ai = False
-        elif ai_probability < 0.65:
+        elif ai_probability < 0.50:
             status = 'SUSPICIOUS'
-            is_ai = ai_probability > 0.5
+            is_ai = ai_probability > 0.40
         else:
             status = 'CRITICAL'
             is_ai = True
@@ -148,7 +153,21 @@ class AIImageDetector:
 
     def _load_image(self, path: str) -> Optional[np.ndarray]:
         try:
-            return np.array(Image.open(path).convert('RGB'))
+            img = Image.open(path)
+            # 处理各种格式：HEIC、CMYK PNG、RGBA等
+            if img.mode in ('RGBA', 'LA', 'P'):
+                img = img.convert('RGB')
+            elif img.mode == 'CMYK':
+                img = img.convert('RGB')
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
+            # 修复旋转（根据EXIF方向）
+            try:
+                from PIL import ImageOps
+                img = ImageOps.exif_transpose(img)
+            except:
+                pass
+            return np.array(img)
         except Exception as e:
             print(f"加载失败: {e}")
             return None
