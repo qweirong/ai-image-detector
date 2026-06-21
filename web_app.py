@@ -199,11 +199,11 @@ def api_detect():
             'success': True,
             'filename': result.filename,
             'status': result.status,
-            'is_ai_generated': result.is_ai_generated,
-            'ai_probability': result.ai_probability,
-            'confidence': result.confidence,
-            'trust_score': result.trust_score,
-            'indicators': result.indicators,
+            'is_ai_generated': bool(result.is_ai_generated),
+            'ai_probability': float(result.ai_probability),
+            'confidence': float(result.confidence),
+            'trust_score': float(result.trust_score),
+            'indicators': {k: float(v) for k, v in result.indicators.items()},
             'timestamp': timestamp
         }
         return jsonify(response)
