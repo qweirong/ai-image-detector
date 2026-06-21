@@ -8,6 +8,7 @@ AI图像检测 Web服务 - Render最简稳定版（支持批量检测）
 """
 
 import os
+import gc
 import traceback
 import tempfile
 import warnings
@@ -91,11 +92,11 @@ HTML_PAGE = '''<!DOCTYPE html>
     <div class="container">
         <header>
             <h1>AI图像检测器</h1>
-            <p>上传图片，检测是否为AI生成（支持同时上传最多10张）</p>
+            <p>上传图片，检测是否为AI生成（支持同时上传最多5张）</p>
         </header>
         <div class="upload-area" id="uploadArea">
             <h3>点击上传图片</h3>
-            <p>支持 JPG、PNG、WebP 格式，最多10张，每张最大16MB</p>
+            <p>支持 JPG、PNG、WebP 格式，最多5张，每张最大16MB</p>
             <input type="file" id="fileInput" accept="image/*" multiple>
             <button class="btn" id="selectBtn">选择图片</button>
         </div>
@@ -135,8 +136,8 @@ HTML_PAGE = '''<!DOCTYPE html>
 
         fileInput.addEventListener("change", () => {
             const newFiles = Array.from(fileInput.files);
-            if (selectedFiles.length + newFiles.length > 10) {
-                newFiles = newFiles.slice(0, 10 - selectedFiles.length);
+            if (selectedFiles.length + newFiles.length > 5) {
+                newFiles = newFiles.slice(0, 5 - selectedFiles.length);
             }
             selectedFiles = selectedFiles.concat(newFiles);
             renderPreviews();
@@ -156,7 +157,7 @@ HTML_PAGE = '''<!DOCTYPE html>
                 return;
             }
             previewSection.style.display = "block";
-            previewInfo.textContent = "已选择 " + selectedFiles.length + "/10 张图片";
+            previewInfo.textContent = "已选择 " + selectedFiles.length + "/5 张图片";
             selectedFiles.forEach((file, i) => {
                 const div = document.createElement("div");
                 div.className = "preview-item";
@@ -293,8 +294,8 @@ def api_detect_batch():
 
     files = request.files.getlist('images')
 
-    # 限制最多10张
-    files = files[:10]
+    # 限制最多5张
+    files = files[:5]
 
     results = []
 
@@ -308,7 +309,7 @@ def api_detect_batch():
         file.save(filepath)
 
         try:
-            result = detector.detect(filepath, max_size=1024)
+            result = detector.detect(filepath, max_size=512)
 
             results.append({
                 'filename': result.filename,
@@ -335,6 +336,8 @@ def api_detect_batch():
                 os.unlink(filepath)
             except Exception:
                 pass
+            # 强制释放内存
+            gc.collect()
 
     ai_count = sum(1 for r in results if r.get('is_ai_generated'))
     suspicious_count = sum(1 for r in results if r.get('status') == 'SUSPICIOUS')
